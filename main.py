@@ -1,7 +1,8 @@
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
-from monthly_breakdown import MonthlyBreakdown  # Assuming you have the MonthlyBreakdown class in a separate file
+from monthly_breakdown import MonthlyBreakdown  
+from transaction_manager import TransactionManager
 from theme import ThemeManager
 
 class FinancialApp:
@@ -108,7 +109,7 @@ class HomePage(ttk.Frame):
 
     def add_new_month(self):
         # This still opens in a new window as it's a modal dialog
-        pass
+        TransactionManager(self)
 
     def show_monthly_breakdown(self):
         self.app.show_page(self.app.monthly_breakdown_page)
