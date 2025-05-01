@@ -7,43 +7,56 @@ import webbrowser
 import os
 from datetime import datetime
 import pandas as pd
-from theme import ThemeManager
 
-class NetWorth:
-    def __init__(self, parent):
-        self.frame = ttk.Frame(parent, style='Card.TFrame')
-        
-        # Create controls frame
-        self.controls_frame = ttk.Frame(self.frame, style='Card.TFrame')
-        self.controls_frame.grid(row=0, column=0, sticky='ew', pady=(0, 20))
-        
+class NetWorth(ttk.Frame):
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self.app = app
+
+        self.frame = ttk.Frame(self, style='Card.TFrame')
+        self.frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)  # This ensures it displays properly
+
+        # Create heading frame
+        self.heading_frame = ttk.Frame(self.frame, style='Card.TFrame')
+        self.heading_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
+
+        self.create_heading_bar()
+
+        # Create chart frame
+        self.chart_frame = ttk.Frame(self.frame, style='Card.TFrame')
+        self.chart_frame.pack(fill=tk.BOTH, expand=True, padx=(0, 10), side='left')
+
+        # Load initial data
+        # self.update_charts()
+
+    def create_heading_bar(self):
+
+        ttk.Label(self.heading_frame, text="Net Worth", style='Subheading.TLabel').pack(side=tk.LEFT, padx=5)
+
         # Create update button
         ttk.Button(
-            self.controls_frame,
+            self.heading_frame,
             text="Update Net Worth",
             command=self.show_update_dialog,
             style='Primary.TButton'
-        ).grid(row=0, column=0, padx=20)
-        
-        # Create chart frame
-        self.chart_frame = ttk.Frame(self.frame, style='Card.TFrame')
-        self.chart_frame.grid(row=1, column=0, sticky='nsew')
-        
-        # Configure grid weights
-        self.frame.grid_rowconfigure(1, weight=1)
-        self.frame.grid_columnconfigure(0, weight=1)
-        
-        # Load initial data
-        self.update_charts()
+        ).pack(side=tk.LEFT, padx=20)
+
+        # Back home button
+        ttk.Button(
+            self.heading_frame,
+            text="Back",
+            command=self.return_home,
+            style='Primary.TButton'
+        ).pack(side=tk.RIGHT, padx=20)
+
+    def return_home(self):
+        self.app.show_page(self.app.home_page)  
     
     def show_update_dialog(self):
         dialog = tk.Toplevel(self.frame)
         dialog.title("Update Net Worth")
         dialog.geometry("400x500")
-        
-        # Apply theme to dialog
-        ThemeManager.apply_theme(dialog)
-        
+    
         # Create main container
         main_frame = ttk.Frame(dialog, style='Card.TFrame')
         main_frame.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
@@ -51,50 +64,96 @@ class NetWorth:
         # Configure dialog grid weights
         dialog.grid_rowconfigure(0, weight=1)
         dialog.grid_columnconfigure(0, weight=1)
-        main_frame.grid_rowconfigure(2, weight=1)  # Space between assets and liabilities
         
         # Create entry fields
-        entries = {}
+        self.entries = {}
+
+        # Connect to database
+        conn = sqlite3.connect('financial_data.db')
+        cursor = conn.cursor()
+                
+        # Get all assets and libilities
+        cursor.execute("SELECT asset_name FROM networth WHERE type = 'asset'")
+        asset_types = [row[0] for row in cursor.fetchall()]  
+
+        cursor.execute("SELECT asset_name FROM networth WHERE type = 'liability'")
+        liability_types = [row[0] for row in cursor.fetchall()]  
+
+        conn.close()
         
-        # Assets section
+        # ----------------- Assets ---------------------------
         ttk.Label(main_frame, text="Assets", style='Subheading.TLabel').grid(row=0, column=0, pady=(0, 10))
         
-        asset_types = ["Cash", "Investments", "Real Estate", "Vehicles", "Other"]
-        for i, asset_type in enumerate(asset_types):
-            frame = ttk.Frame(main_frame, style='Card.TFrame')
-            frame.grid(row=i+1, column=0, sticky='ew', pady=5)
-            ttk.Label(frame, text=asset_type, style='Body.TLabel').grid(row=0, column=0)
-            entry = ttk.Entry(frame)
-            entry.grid(row=0, column=1, sticky='ew', padx=5)
-            frame.grid_columnconfigure(1, weight=1)
-            entries[asset_type] = entry
-        
-        # Liabilities section
-        ttk.Label(main_frame, text="Liabilities", style='Subheading.TLabel').grid(row=7, column=0, pady=(20, 10))
-        
-        liability_types = ["Mortgage", "Car Loan", "Credit Cards", "Student Loans", "Other"]
-        for i, liability_type in enumerate(liability_types):
-            frame = ttk.Frame(main_frame, style='Card.TFrame')
-            frame.grid(row=i+8, column=0, sticky='ew', pady=5)
-            ttk.Label(frame, text=liability_type, style='Body.TLabel').grid(row=0, column=0)
-            entry = ttk.Entry(frame)
-            entry.grid(row=0, column=1, sticky='ew', padx=5)
-            frame.grid_columnconfigure(1, weight=1)
-            entries[liability_type] = entry
-        
-        # Save button
+        asset_container = ttk.Frame(main_frame)
+        asset_container.grid(row=1, column=0, sticky='ew')
+        asset_container.grid_columnconfigure(0, weight=1)
+
+        for asset in asset_types:
+            self._add_entry_row(asset_container, asset, "asset")
+
+        def prompt_new_asset():
+            self._prompt_and_add_new_row(asset_container, "asset")
+
+        ttk.Button(main_frame, text="+ Add Asset", command=prompt_new_asset).grid(row=2, column=0, pady=(10, 20), sticky='w')
+
+
+            # ----------------- Liabilities ------------------------
+        ttk.Label(main_frame, text="Liabilities", style='Subheading.TLabel').grid(row=3, column=0, sticky='w', pady=(10, 10))
+
+        liability_container = ttk.Frame(main_frame)
+        liability_container.grid(row=4, column=0, sticky='ew')
+        liability_container.grid_columnconfigure(0, weight=1)
+
+        for liability in liability_types:
+            self._add_entry_row(liability_container, liability, "liability")
+
+        def prompt_new_liability():
+            self._prompt_and_add_new_row(liability_container, "liability")
+
+        ttk.Button(main_frame, text="+ Add Liability", command=prompt_new_liability).grid(row=5, column=0, pady=(10, 20), sticky='w')
+
+
+        # === SAVE ===
         ttk.Button(
             main_frame,
             text="Save",
-            command=lambda: self.save_net_worth(entries, dialog),
+            command=lambda: self.save_net_worth(self.entries, dialog),
             style='Primary.TButton'
-        ).grid(row=13, column=0, pady=20)
+        ).grid(row=6, column=0, pady=20, sticky='ew')
+
+    def _add_entry_row(self, container, name, entry_type):
+        frame = ttk.Frame(container)
+        frame.pack(fill='x', pady=5)
+        ttk.Label(frame, text=name, style='Body.TLabel').pack(side='left', padx=5)
+        entry = ttk.Entry(frame)
+        entry.pack(side='right', fill='x', expand=True, padx=5)
+        self.entries[(entry_type, name)] = entry
+
+    def _prompt_and_add_new_row(self, container, entry_type):
+        def on_confirm():
+            name = name_entry.get().strip()
+            if name:
+                self._add_entry_row(container, name, entry_type)
+                popup.destroy()
+            else:
+                messagebox.showerror("Error", "Name cannot be empty.")
+
+        popup = tk.Toplevel(self)
+        popup.title(f"Add New {entry_type.title()}")
+        popup.geometry("300x120")
+
+        ttk.Label(popup, text=f"{entry_type.title()} Name:").pack(pady=10)
+        name_entry = ttk.Entry(popup)
+        name_entry.pack(pady=5, padx=10, fill='x')
+        ttk.Button(popup, text="Add", command=on_confirm).pack(pady=10)
+
     
     def save_net_worth(self, entries, dialog):
         try:
             conn = sqlite3.connect('financial_data.db')
             cursor = conn.cursor()
             
+            print(entries)
             # Get current date
             current_date = datetime.now().strftime('%Y-%m-%d')
             

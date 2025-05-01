@@ -68,7 +68,7 @@ class TransactionManager:
         cursor.execute('SELECT name FROM categories')
         categories = [row[0] for row in cursor.fetchall()]
         conn.close()
-        return categories if categories else ["Food", "Transport", "Shopping", "Entertainment", "Bills"]
+        return categories
 
     def save_transaction(self):
         """Save the current transaction to the database."""

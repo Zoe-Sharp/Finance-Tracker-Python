@@ -2,25 +2,25 @@ import tkinter as tk
 from tkinter import ttk
 import tkinter.messagebox as messagebox
 import sqlite3
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import webbrowser
-import os
+import matplotlib.pyplot as plt
+import pandas as pd
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from datetime import datetime
-from theme import ThemeManager
+
 
 class MonthlyBreakdown(ttk.Frame):
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
-        
-        # Initialize Monthly Breakdown page similar to your previous MonthlyBreakdown layout
+
+        # Create main content frame (self.frame) within this page
         self.frame = ttk.Frame(self, style='Card.TFrame')
-        
+        self.frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)  # This ensures it displays properly
+
         # Create controls frame
         self.controls_frame = ttk.Frame(self.frame, style='Card.TFrame')
         self.controls_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
-        
+    
         # Create month and year selection
         self.create_date_selection()
         
@@ -29,12 +29,12 @@ class MonthlyBreakdown(ttk.Frame):
         self.content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # Create left frame for table
-        self.table_frame = ttk.Frame(self.content_frame, style='Card.TFrame')
-        self.table_frame.pack(fill=tk.BOTH, expand=True, padx=(0, 10))
+        self.table_frame = ttk.Frame(self.content_frame, style='Card.TFrame', width=600)
+        self.table_frame.pack(fill=tk.BOTH, expand=True, padx=(0, 10), side='left')
         
         # Create right frame for pie chart
-        self.chart_frame = ttk.Frame(self.content_frame, style='Card.TFrame')
-        self.chart_frame.pack(fill=tk.BOTH, expand=True)
+        self.chart_frame = ttk.Frame(self.content_frame, style='Card.TFrame', width=400)
+        self.chart_frame.pack(fill=tk.BOTH, expand=True, padx=(0, 10), side='left')
         
         # Load initial data
         self.load_data()
@@ -63,6 +63,9 @@ class MonthlyBreakdown(ttk.Frame):
             width=5
         )
         self.year_combo.pack(side=tk.LEFT, padx=5)
+
+        self.month_combo.set(str(datetime.now().month))
+        self.year_combo.set(str(datetime.now().year))
         
         # Update button
         ttk.Button(
@@ -71,7 +74,18 @@ class MonthlyBreakdown(ttk.Frame):
             command=self.load_data,
             style='Primary.TButton'
         ).pack(side=tk.LEFT, padx=20)
-    
+
+        # Back home button
+        ttk.Button(
+            self.controls_frame,
+            text="Back",
+            command=self.return_home,
+            style='Primary.TButton'
+        ).pack(side=tk.RIGHT, padx=20)
+
+    def return_home(self):
+        self.app.show_page(self.app.home_page)  
+        
     def create_table(self):
         # Create treeview
         columns = ('category', 'budget', 'actual', 'difference')
@@ -101,20 +115,6 @@ class MonthlyBreakdown(ttk.Frame):
         self.table_frame.grid_rowconfigure(0, weight=1)
         self.table_frame.grid_columnconfigure(0, weight=1)
     
-    def create_pie_chart(self):
-        # Create a button to show the pie chart
-        self.chart_button = ttk.Button(
-            self.chart_frame,
-            text="Show Pie Chart",
-            command=self.show_pie_chart,
-            style='Secondary.TButton'
-        )
-        self.chart_button.grid(row=0, column=0, pady=10)
-        
-        # Configure grid weights
-        self.chart_frame.grid_rowconfigure(0, weight=1)
-        self.chart_frame.grid_columnconfigure(0, weight=1)
-    
     def load_data(self):
         try:
             month = int(self.month_var.get())
@@ -122,6 +122,9 @@ class MonthlyBreakdown(ttk.Frame):
             
             conn = sqlite3.connect('financial_data.db')
             cursor = conn.cursor()
+
+            # Create Table
+            self.create_table()
             
             # Get all categories
             cursor.execute('SELECT name FROM categories')
@@ -131,6 +134,8 @@ class MonthlyBreakdown(ttk.Frame):
             for item in self.tree.get_children():
                 self.tree.delete(item)
             
+            catergories_amounts = {}
+
             # For each category, get budget and actual spending
             for category in categories:
                 # Get actual spending
@@ -140,10 +145,12 @@ class MonthlyBreakdown(ttk.Frame):
                     WHERE category = ? AND month = ? AND year = ?
                 ''', (category, month, year))
                 actual = cursor.fetchone()[0]
+
+                catergories_amounts[category] = actual
                 
-                # TODO: Get budget from budget table
-                # For now, using a placeholder budget
-                budget = 1000
+                # Get budget for each category
+                cursor.execute("SELECT budget FROM categories WHERE name = ?", (category,))
+                budget = cursor.fetchone()[0]
                 
                 # Calculate difference
                 difference = actual - budget
@@ -155,44 +162,51 @@ class MonthlyBreakdown(ttk.Frame):
                     f"${actual:,.2f}",
                     f"${difference:,.2f}"
                 ))
-            
+
+            # Get categories and types
+            df = pd.read_sql_query("SELECT name, type FROM categories", conn)
+
+            # Group by 'type' and aggregate names into a list
+            grouped_df = df.groupby("type")["name"].apply(list).reset_index()
+
+            type_amounts = {}
+            for i, row in grouped_df.iterrows():
+                type_name = row['type']
+                category_list = row['name']
+                amount_sum = 0
+                for category in category_list:
+                    amount_sum += catergories_amounts[category]
+
+                type_amounts[type_name] = abs(amount_sum)
+
             conn.close()
+
+            self.show_pie_chart(type_amounts)
             
         except Exception as e:
+            print(str(e))
             messagebox.showerror("Error", f"Error loading data: {str(e)}")
     
-    def show_pie_chart(self):
-        try:
-            # Get data from treeview
-            categories = []
-            amounts = []
+    def show_pie_chart(self, amounts):
+        # Clear previous chart widgets in case you want to refresh
+        for widget in self.chart_frame.winfo_children():
+            widget.destroy()
+
+        # Get data from treeview
+        categories = ["Spending", "Expenses", "Assets"]
+        values = [amounts.get(category, 1) if amounts.get(category, 1) != 0 else 1 for category in categories]
+
+        # Create a Matplotlib figure and pie chart
+        fig, ax = plt.subplots()
+        ax.pie(values, labels=categories, autopct='%1.1f%%', startangle=90)
+        ax.set_title("Monthly Spending")
+        ax.axis('equal')  # Makes sure pie is drawn as a circle
+
+         # Embed into self.chart_frame
+        canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill='both', expand=True)
             
-            for item in self.tree.get_children():
-                values = self.tree.item(item)['values']
-                category = values[0]
-                amount = float(values[2].replace('$', '').replace(',', ''))
-                
-                if amount > 0:  # Only include categories with spending
-                    categories.append(category)
-                    amounts.append(amount)
-            
-            # Create pie chart
-            fig = go.Figure(data=[go.Pie(
-                labels=categories,
-                values=amounts,
-                hole=.3
-            )])
-            
-            # Update layout
-            fig.update_layout(
-                title=f"Spending by Category - {self.month_var.get()}/{self.year_var.get()}",
-                showlegend=True
-            )
-            
-            # Save and show the chart
-            html_file = 'monthly_breakdown.html'
-            fig.write_html(html_file)
-            webbrowser.open('file://' + os.path.realpath(html_file))
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Error creating pie chart: {str(e)}") 
+        
+
+   
