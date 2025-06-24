@@ -1,9 +1,8 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import sqlite3
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import webbrowser
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 import os
 from datetime import datetime
 import pandas as pd
@@ -27,7 +26,7 @@ class NetWorth(ttk.Frame):
         self.chart_frame.pack(fill=tk.BOTH, expand=True, padx=(0, 10), side='left')
 
         # Load initial data
-        # self.update_charts()
+        self.update_charts()
 
     def create_heading_bar(self):
 
@@ -96,7 +95,6 @@ class NetWorth(ttk.Frame):
 
         ttk.Button(main_frame, text="+ Add Asset", command=prompt_new_asset).grid(row=2, column=0, pady=(10, 20), sticky='w')
 
-
             # ----------------- Liabilities ------------------------
         ttk.Label(main_frame, text="Liabilities", style='Subheading.TLabel').grid(row=3, column=0, sticky='w', pady=(10, 10))
 
@@ -111,7 +109,6 @@ class NetWorth(ttk.Frame):
             self._prompt_and_add_new_row(liability_container, "liability")
 
         ttk.Button(main_frame, text="+ Add Liability", command=prompt_new_liability).grid(row=5, column=0, pady=(10, 20), sticky='w')
-
 
         # === SAVE ===
         ttk.Button(
@@ -153,27 +150,19 @@ class NetWorth(ttk.Frame):
             conn = sqlite3.connect('financial_data.db')
             cursor = conn.cursor()
             
-            print(entries)
             # Get current date
             current_date = datetime.now().strftime('%Y-%m-%d')
             
-            # Save assets
+            # Save all
             for asset_type, entry in entries.items():
+                type = asset_type[0]
+                name = asset_type[1]
                 if entry.get().strip():
                     amount = float(entry.get())
                     cursor.execute('''
                         INSERT INTO networth (date, asset_name, amount, type)
-                        VALUES (?, ?, ?, 'asset')
-                    ''', (current_date, asset_type, amount))
-            
-            # Save liabilities
-            for liability_type, entry in entries.items():
-                if entry.get().strip():
-                    amount = float(entry.get())
-                    cursor.execute('''
-                        INSERT INTO networth (date, asset_name, amount, type)
-                        VALUES (?, ?, ?, 'liability')
-                    ''', (current_date, liability_type, amount))
+                        VALUES (?, ?, ?, ?)
+                    ''', (current_date, name, amount, type))
             
             conn.commit()
             conn.close()
@@ -187,7 +176,7 @@ class NetWorth(ttk.Frame):
         except Exception as e:
             messagebox.showerror("Error", f"Error saving net worth: {str(e)}")
     
-    def update_charts(self):
+    def get_networth_data(self):
         try:
             conn = sqlite3.connect('financial_data.db')
             cursor = conn.cursor()
@@ -226,66 +215,125 @@ class NetWorth(ttk.Frame):
                 GROUP BY date
                 ORDER BY date
             ''')
-            net_worth_data = cursor.fetchall()
+            sum_by_entry = cursor.fetchall()
             
             conn.close()
+
+            networth_raw_data = {
+                'assets': assets,
+                'liabilities': liabilities,
+                'total_by_entry': sum_by_entry
+            }
             
-            # Create subplots
-            fig = make_subplots(
-                rows=2, cols=1,
-                subplot_titles=("Assets and Liabilities", "Net Worth Over Time")
-            )
-            
-            # Add assets pie chart
-            if assets:
-                fig.add_trace(
-                    go.Pie(
-                        labels=[a[0] for a in assets],
-                        values=[a[1] for a in assets],
-                        name="Assets",
-                        hole=.3
-                    ),
-                    row=1, col=1
-                )
-            
-            # Add liabilities pie chart
-            if liabilities:
-                fig.add_trace(
-                    go.Pie(
-                        labels=[l[0] for l in liabilities],
-                        values=[l[1] for l in liabilities],
-                        name="Liabilities",
-                        hole=.3
-                    ),
-                    row=1, col=1
-                )
-            
-            # Add net worth line
-            if net_worth_data:
-                dates = [d[0] for d in net_worth_data]
-                net_worth = [d[1] - d[2] for d in net_worth_data]
-                
-                fig.add_trace(
-                    go.Scatter(
-                        x=dates,
-                        y=net_worth,
-                        name="Net Worth",
-                        mode='lines+markers'
-                    ),
-                    row=2, col=1
-                )
-            
-            # Update layout
-            fig.update_layout(
-                title=f"Net Worth Overview - Last Updated: {latest_date}",
-                showlegend=True,
-                height=800
-            )
-            
-            # Save and show the chart
-            html_file = 'net_worth.html'
-            fig.write_html(html_file)
-            webbrowser.open('file://' + os.path.realpath(html_file))
-            
+            return networth_raw_data
+        
         except Exception as e:
             messagebox.showerror("Error", f"Error updating charts: {str(e)}") 
+
+    def update_charts(self):
+        networth_raw_data = self.get_networth_data()
+        if not networth_raw_data:
+            return
+
+        assets = networth_raw_data['assets']
+        liabilities = networth_raw_data['liabilities']
+        total_by_entry = networth_raw_data['total_by_entry']
+
+        # Clear previous widgets
+        for widget in self.chart_frame.winfo_children():
+            widget.destroy()
+
+        # Split layout
+        table_frame = ttk.Frame(self.chart_frame)
+        table_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+
+        graph_frame = ttk.Frame(self.chart_frame)
+        graph_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        # Totals
+        total_assets = sum([a[1] for a in assets])
+        total_liabilities = sum([l[1] for l in liabilities])
+        net_worth_total = total_assets - total_liabilities
+
+        # === TABLES FIGURE ===
+        table_fig = Figure(figsize=(5, 6), dpi=100)
+        table_fig.patch.set_facecolor('#f0f4f8')
+
+        def create_styled_table(ax, data, title):
+            ax.axis('off')
+            ax.set_title(title, fontweight='bold', color='navy')
+
+            row_colors = ['#f6f8fa' if i % 2 == 0 else '#e0e8f0' for i in range(len(data))]
+            table = ax.table(
+                cellText=data,
+                loc='center',
+                cellLoc='left',
+                colLabels=None,
+                rowLabels=None,
+                colWidths=[0.4, 0.3],
+                cellColours=[[row_colors[i]] * len(data[0]) for i in range(len(data))]
+            )
+
+            table.auto_set_font_size(False)
+            table.set_fontsize(10)
+            table.scale(1.0, 1.5)
+
+            for (row, col), cell in table.get_celld().items():
+                if row == 0:
+                    cell.set_text_props(weight='bold', color='white')
+                    cell.set_facecolor('navy')
+                elif row == len(data) - 1:
+                    cell.set_text_props(weight='bold')
+                    cell.set_facecolor('#cfe0f3')
+                cell.set_edgecolor('#ccc')
+
+        # === Assets Table ===
+        ax1 = table_fig.add_subplot(211)
+        asset_table_data = [["Asset", "Amount ($)"]] + [[a[0], f"{a[1]:,.2f}"] for a in assets]
+        asset_table_data.append(["Total", f"{total_assets:,.2f}"])
+        create_styled_table(ax1, asset_table_data, "Assets")
+
+        # === Liabilities Table ===
+        ax2 = table_fig.add_subplot(212)
+        liability_table_data = [["Liability", "Amount ($)"]] + [[l[0], f"{l[1]:,.2f}"] for l in liabilities]
+        liability_table_data.append(["Total", f"{total_liabilities:,.2f}"])
+        create_styled_table(ax2, liability_table_data, "Liabilities")
+
+        # === Render Table Figure ===
+        table_canvas = FigureCanvasTkAgg(table_fig, master=table_frame)
+        table_canvas.draw()
+        table_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # === Total Net Worth Label ===
+        ttk.Label(
+            table_frame,
+            text=f"Net Worth: ${net_worth_total:,.2f}",
+            style='Heading.TLabel',
+            foreground='navy',
+            font=("Helvetica", 12, "bold")
+        ).pack(pady=(10, 0))
+
+        # === GRAPH FIGURE ===
+        graph_fig = Figure(figsize=(6, 4), dpi=100)
+        graph_fig.patch.set_facecolor('#f0f4f8')
+        ax3 = graph_fig.add_subplot(111)
+        ax3.set_facecolor('#e8ecf0')
+
+        if total_by_entry:
+            dates = [row[0] for row in total_by_entry]
+            asset_totals = [row[1] for row in total_by_entry]
+            liability_totals = [row[2] for row in total_by_entry]
+            net_worth = [a - l for a, l in zip(asset_totals, liability_totals)]
+
+            ax3.plot(dates, net_worth, marker='o', color='navy', label='Net Worth')
+            ax3.set_title("Net Worth Over Time", fontweight='bold')
+            ax3.set_xlabel("Date")
+            ax3.set_ylabel("Amount")
+            ax3.tick_params(axis='x', rotation=45)
+            ax3.grid(True, linestyle='--', alpha=0.5)
+            ax3.legend()
+
+        # Render Graph Figure
+        graph_canvas = FigureCanvasTkAgg(graph_fig, master=graph_frame)
+        graph_canvas.draw()
+        graph_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
